@@ -7,6 +7,15 @@ Dict structure is src_name (str)
                       Gaussian blurred snow (numpy array)
                       Normalized (0 to 1) snow (numpy array)
 '''
+
+import os
+import rasterio
+from sklearn.preprocessing import *
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+%matplotlib qt
+
 # Initialize empty dictionary
 
 src_dict = {}
