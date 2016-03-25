@@ -6,6 +6,12 @@ Dict structure is src_name (str)
                       rasterio metadata
                       Gaussian blurred snow (numpy array)
                       Normalized (0 to 1) snow (numpy array)
+                      binary drift mask (numpy masked array)
+                      binary scour mask (numpy masked array)
+                      normal drift snow (numpy array)
+                      real drift snow (numpy array)
+                      normal scour snow (numpy array)
+                      real scour snow (numpy array)
 '''
 
 import os
@@ -23,7 +29,7 @@ src_dict = {}
 # Can use glob to pull all snow rasters in a certain folder
 test = ['/home/cparr/water_tracks/sub_wt_2012.tif', '/home/cparr/water_tracks/sub_wt_2013.tif']
 
-def read_gtiffs( tif_list ):
+def preprocess_snow( tif_list ):
     
     for f in tif_list:
         
@@ -46,7 +52,7 @@ def read_gtiffs( tif_list ):
         src_dict[src_name] = real_snow, meta, blur_snow, norm_snow,drifted_mask, scoured_mask,drifted_norm_snow, drifted_real_snow,scoured_norm_snow, scoured_real_snow
         #return src_dict
         
-read_gtiffs( test )
+preprocess_snow( test )
 
 i = 1
 for k,v in src_dict.iteritems():
