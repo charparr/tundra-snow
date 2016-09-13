@@ -1,8 +1,3 @@
-
-# coding: utf-8
-
-# In[1]:
-
 # Data wrangling libraries
 import pandas as pd
 import numpy as np
@@ -29,9 +24,6 @@ from skimage.measure import compare_ssim as ssim
 from skimage.measure import compare_mse as mse
 from skimage.transform import AffineTransform
 from skimage.transform import warp
-
-
-# In[2]:
 
 ### Similarity Test Functions ###
 
@@ -146,9 +138,6 @@ def df_window(df):
         df.to_html(f)
     webbrowser.open(f.name)
 
-
-# In[3]:
-
 # Reference Pattern of Horizontal Stripes alternating 4 white (1) and 4 black (0)
 stripes = np.zeros(( 32, 32 ))
 j = 0
@@ -164,14 +153,11 @@ mu = 0.5
 sigma = 0.15
 gauss = np.random.normal( mu, sigma, ( 32,32 ))
 
-
-# In[4]:
-
 '''
 Warping a reference pattern of binary data.
 '''
-binwarp_data = []
 
+binwarp_data = []
 # Initialize lists for metrics.
 mse_vals = []
 ssim_vals = []
@@ -190,15 +176,12 @@ cw_ssim_maps = []
 def warp_binary(pattern):
     
     binwarp_data.append(pattern)
-    
     rows, cols = pattern.shape
-    
     # half phase shift for stripes
     half_phase = np.zeros((32, 32))
 
     j = 2
     k = 6
-
     while k < 33:
         half_phase[j:k] = 1
         j = j + 8
@@ -233,7 +216,6 @@ def warp_binary(pattern):
     permutation = np.random.permutation(pattern)
     binwarp_data.append(permutation)
     
-    
     # Random Affine Transformation
     c = np.random.random_sample(( 6, ))
     m = np.append( c, ( 0,0,1 ) )
@@ -260,7 +242,6 @@ def warp_binary(pattern):
         edge[j:k] = 1
         j = j + 8
         k = j + 4
-    
     edge[3][1::2] = 0
     edge[7][1::2] = 1
     edge[11][1::2] = 0
@@ -280,28 +261,21 @@ binwarp_names = ['Original', 'Half Phase Shift', 'Rotate 90','Rotate 45',
 warp_binary(stripes)
 
 # Call Metrics on list of test patterns
-
 structural_sim( binwarp_data )
 reg_mse( binwarp_data )
 make_quadrants( binwarp_data )
 imse(binwarp_data)
 cw_ssim_value(binwarp_data, 30)
 
-
 # Match names and arrays
 binary_zip = zip(binwarp_names,binwarp_data, mse_vals, ssim_vals, top_lefts, top_rights, low_lefts, low_rights, 
                imse_vals, imse_maps, mse_maps, ssim_maps, cw_ssim_vals, cw_ssim_maps)
 
-
-# In[5]:
-
 binary_dict = defaultdict(dict)
-
-# Making a look up dictionary from all the patterns and their comparison scores.
-# zipped list [i][0] is namne, 1 is full array, 2 is mse val, 3 is SSIM, 4 is PD,
-# 5 through 8 are quadrants
-# 9 is IMSE, 10 is IMSE Map
-
+'''
+Making a look up dictionary from all the patterns and their comparison scores.
+Zipped list [i][0] is namne, 1 is full array, 2 is mse val, 3 is SSIM, 4 is PD, 5 through 8 are quadrants, 9 is IMSE, 10 is IMSE Map
+'''
 
 def to_dict_w_hists( data_dict, keys, data_zip ):
 
@@ -434,9 +408,6 @@ to_dict_w_hists( binary_dict, binwarp_names, binary_zip )
 bin_df = pd.DataFrame.from_dict( binary_dict )
 bin_df = bin_df.transpose()
 
-
-# In[7]:
-
 # Histogram Scores
 
 hist_scores = bin_df.loc[:,['name', 'Bhattacharyya UL','Bhattacharyya UR','Bhattacharyya LL',
@@ -459,9 +430,6 @@ hist_scores = hist_scores[['Mean Bhattacharyya', 'Mean Chi Square','Mean Correla
 hist_scores = hist_scores.sort_values('Mean Bhattacharyya')
 
 df_window(hist_scores)
-
-
-# In[8]:
 
 # Binary Scores DataFrame
 
@@ -486,9 +454,6 @@ del ranks['CW SSIM']
 ranks = ranks.sort_values('CW-SSIM Rank')
 
 df_window(ranks)
-
-
-# In[9]:
 
 from matplotlib import six
 
@@ -516,17 +481,11 @@ def render_mpl_table(data, col_width=3.0, row_height=0.625, font_size=14,
             cell.set_facecolor(row_colors[k[0]%len(row_colors) ])
     return ax
 
-
-# In[10]:
-
 render_mpl_table(ranks)
 plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_ranks.png', bbox_inches = 'tight', dpi = 300)
 plt.close()
 render_mpl_table(binary_scores)
 plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_scores.png', bbox_inches = 'tight', dpi = 300)
-
-
-# In[11]:
 
 # Plot binary patterns and distortions
 
@@ -579,9 +538,6 @@ def plot_tests(names, test_vals, test_name, data, rows, cols, cmin, cmax):
     fig.colorbar( im, cax=cax, ticks = ( [cmin, cmax] ) )
     cax.tick_params(labelsize = 8)
 
-
-# In[12]:
-
 plot_binary( binwarp_names, binwarp_data )
 plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_test_patterns.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
 plt.close()
@@ -602,9 +558,3 @@ plt.close()
 
 plot_tests( binwarp_names, cw_ssim_vals, " CW SSIM: ", cw_ssim_maps, 4, 4, -1, 1 )
 plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_cw_ssim_map.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
-
-
-# In[ ]:
-
-
-
