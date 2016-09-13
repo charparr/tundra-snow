@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[11]:
 
 # Data wrangling libraries
 import pandas as pd
@@ -21,6 +21,7 @@ from tempfile import NamedTemporaryFile
 import scipy
 import cv2
 from scipy import signal
+from scipy import fftpack
 from scipy.spatial import *
 from scipy.ndimage import *
 from skimage.transform import *
@@ -32,7 +33,7 @@ from skimage.transform import AffineTransform
 from skimage.transform import warp
 
 
-# In[2]:
+# In[12]:
 
 ### Similarity Test Functions ###
 
@@ -140,8 +141,33 @@ def cw_ssim_value(data, width):
             # Average the per pixel results
             index = round( np.average(ssim_map), 2) 
             cw_ssim_vals.append(index)
+            
+# Mag. Spectrum
+
+def transform( data ):
+    
+    for d in data:
+        f = np.fft.fft2( d )
+        fshift = np.fft.fftshift(f)
+        magnitude_spectrum = 20*np.log(np.abs(fshift))
+        mag_maps.append( magnitude_spectrum )
         
+        mean_freq = magnitude_spectrum.mean(axis = 0)
+        mean_freq = np.absolute(mean_freq)
+        freqs.append(mean_freq)
+        
+def disccost( data ):
+    
+    for d in data:
+        y = fftpack.dct( d )
+        dct_maps.append( y )
+        yc = y.mean(axis = 1 )
+        dct_curves.append( yc )
+
+# np to cv hisogram coversion
+
 def np_hist_to_cv(np_histogram_output):
+    
     counts, bin_edges = np_histogram_output
     return counts.ravel().astype('float32')
 
@@ -173,6 +199,7 @@ def plot_continuous(names, data):
 def plot_tests(names, test_vals, test_name, data, rows, cols, cmin, cmax):
     
     fig, axes = plt.subplots( nrows = 3, ncols = 5 )
+    fig.suptitle( test_name + 'Fidelity Tests of Continuous Patterns' )
     for p, v, dat, ax in zip( names, test_vals, data, axes.flat ):
         # The vmin and vmax arguments specify the color limits
         im = ax.imshow(dat, cmap = 'viridis', interpolation = 'nearest', vmin = cmin, vmax = cmax)
@@ -211,7 +238,7 @@ def render_mpl_table(data, col_width=3.0, row_height=0.625, font_size=14,
     return ax
 
 
-# In[3]:
+# In[13]:
 
 # Reference Patterns
 
@@ -223,7 +250,7 @@ sine = np.sin( pi_cycles )
 cosine = np.cos( pi_cycles )
 
 
-# In[4]:
+# In[14]:
 
 '''
 Warping a base pattern of continuous data.
@@ -250,6 +277,10 @@ ssim_maps = []
 mse_maps = []
 cw_ssim_vals = []
 cw_ssim_maps = []
+mag_maps = []
+freqs = []
+dct_maps = []
+dct_curves = []
 
 # Create the test patterns
 
@@ -341,14 +372,16 @@ procrustes_analysis( ctswarp_data )
 make_quadrants( ctswarp_data )
 imse(ctswarp_data)
 cw_ssim_value(ctswarp_data, 30)
+transform( ctswarp_data )
+disccost( ctswarp_data )
 
 # Zip names, data, metrics, quadrants into a mega list!
 # Generally this is indavisable because it relies on index locations...in the next cell we will make a dictionary.
 cts_zip = zip(ctswarp_names, ctswarp_data, mse_vals, ssim_vals, disp_vals, top_lefts, top_rights, low_lefts, low_rights, 
-               imse_vals, imse_maps, mse_maps, ssim_maps, cw_ssim_vals, cw_ssim_maps)
+               imse_vals, imse_maps, mse_maps, ssim_maps, cw_ssim_vals, cw_ssim_maps, mag_maps, freqs, dct_maps, dct_curves )
 
 
-# In[5]:
+# In[15]:
 
 continuous_dict = defaultdict(dict)
 
@@ -402,6 +435,11 @@ def to_dict_w_hists( data_dict, keys, data_zip ):
         data_dict[keys[i]]['SSIM Map'] = data_zip[i][12]
         data_dict[keys[i]]['CW SSIM'] = data_zip[i][13]
         data_dict[keys[i]]['CW SSIM Map'] = data_zip[i][14]
+        data_dict[keys[i]]['Mag. Map'] = data_zip[i][15]
+        data_dict[keys[i]]['Frequency Transects'] = data_zip[i][16]
+        data_dict[keys[i]]['DCT Map'] = data_zip[i][17]
+        data_dict[keys[i]]['DCT Curve'] = data_zip[i][18]
+
 
         # Histogram Comparisons
 
@@ -491,7 +529,7 @@ cts_df = pd.DataFrame.from_dict(continuous_dict)
 cts_df = cts_df.transpose()
 
 
-# In[6]:
+# In[16]:
 
 # Histogram Scores
 
@@ -517,7 +555,7 @@ hist_scores = hist_scores.sort_values('Mean Bhattacharyya')
 #df_window(hist_scores)
 
 
-# In[7]:
+# In[17]:
 
 # Continuous Scores and Ranks
 
@@ -546,15 +584,19 @@ ranks = ranks.sort_values('CW-SSIM Rank')
 #df_window(cts_scores)
 
 
-# In[10]:
+# In[48]:
 
 render_mpl_table(ranks)
 plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_ranks.png', bbox_inches = 'tight', dpi = 300)
 plt.close()
 
+#
+
 render_mpl_table(cts_scores)
 plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_scores.png', bbox_inches = 'tight', dpi = 300)
 plt.close()
+
+#
 
 plot_continuous( ctswarp_names, ctswarp_data )
 plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_test_patterns.png', bbox_inches = 'tight',
@@ -568,17 +610,66 @@ plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_imse_m
             dpi = 300)
 plt.close()
 
+#
+
 plot_tests( ctswarp_names, mse_vals, " MSE: ", mse_maps, 4, 4, 0, 1 )
 plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_mse_map.png', bbox_inches = 'tight',
             dpi = 300)
 plt.close()
+
+#
 
 plot_tests( ctswarp_names, ssim_vals, " SSIM: ", ssim_maps, 4, 4, -1, 1 )
 plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_ssim_map.png', bbox_inches = 'tight',
             dpi = 300)
 plt.close()
 
+#
+
 plot_tests( ctswarp_names, cw_ssim_vals, " CW SSIM: ", cw_ssim_maps, 4, 4, -1, 1 )
 plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_cw_ssim_map.png', bbox_inches = 'tight',
             dpi = 300)
+plt.close()
+
+### transform plots
+
+plot_tests( ctswarp_names, cw_ssim_vals, " CW-SSIM: ", mag_maps, 4, 4, 0, mag_maps[0].max() )
+plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_fft_map.png', bbox_inches = 'tight',
+            dpi = 300)
+plt.close()
+
+#
+
+plot_tests( ctswarp_names, cw_ssim_vals, " CW-SSIM: ", dct_maps, 4, 4, -5, 5 )
+plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_dct_maps.png', bbox_inches = 'tight',
+            dpi = 300)
+plt.close()
+
+#
+
+fig, axes = plt.subplots( nrows = 3, ncols = 5 )
+
+fig.suptitle( 'X Transect Mean of DCT for Continuous Patterns' )
+
+for p, dat, ax in zip( ctswarp_names, dct_curves, axes.flat ):
+    
+    f = ax.plot( dat, lw = 2 )
+    ax.plot( dct_curves[0], lw = 2, ls = 'dashed', color = 'orange', alpha = 0.6 )
+    ax.set_yticks([-2,0,2])
+    ax.set_xticks([0,16,32])
+    ax.xaxis.set_ticks_position('bottom')
+    ax.yaxis.set_ticks_position('left')
+    ax.set_yticklabels([-2,0,2], size = 6)
+    ax.set_xticklabels([0,16,32], size = 6)
+    ax.set_title( p, size = 7 )
+    
+plt.savefig('/home/cparr/Snow_Patterns/figures/continuous_test/continuous_dct_lines.png', bbox_inches = 'tight',
+            dpi = 300)
+plt.close()
+#
+
+
+# In[49]:
+
+
 
