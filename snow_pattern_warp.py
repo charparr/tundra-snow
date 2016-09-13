@@ -6,10 +6,12 @@
 # Data wrangling libraries
 import pandas as pd
 import numpy as np
+import rasterio
 from collections import defaultdict
 
 # Plotting libraries
 import matplotlib.pyplot as plt
+from matplotlib import six
 get_ipython().magic(u'matplotlib qt')
 
 # View a DataFrame in browser
@@ -31,9 +33,16 @@ from skimage.transform import AffineTransform
 from skimage.transform import warp
 
 
-# In[2]:
+# In[12]:
 
 ### Similarity Test Functions ###
+
+def procrustes_analysis(data):
+    for d in data:
+        mtx1, mtx2, disparity = procrustes(data[0], d)
+        # disparity is the sum of the square errors
+        # mtx2 is the optimal matrix transformation
+        disp_vals.append(disparity.round(3))
 
 def make_quadrants(data):
     
@@ -93,10 +102,12 @@ def cw_ssim_value(data, width):
         """Compute the complex wavelet SSIM (CW-SSIM) value from the reference
         image to the target image.
         Args:
-          target (str or PIL.Image): Input image to compare the reference image to.
+          target (str or PIL.Image): Input image to compare the reference image
+          to. This may be a PIL Image object or, to save time, an SSIMImage
+          object (e.g. the img member of another SSIM object).
           width: width for the wavelet convolution (default: 30)
         Returns:
-          Computed CW-SSIM float value and map of results
+          Computed CW-SSIM float value.
         """
 
         # Define a width for the wavelet convolution
@@ -126,18 +137,18 @@ def cw_ssim_value(data, width):
 
             # Construct the result
             ssim_map = (num_ssim_1 / den_ssim_1) * (num_ssim_2 / den_ssim_2)
-            ssim_map = ssim_map.reshape( 32, 32 )
+            ssim_map = ssim_map.reshape(512,512)
             cw_ssim_maps.append(ssim_map)
 
             # Average the per pixel results
             index = round( np.average(ssim_map), 2) 
             cw_ssim_vals.append(index)
-
-# Numpy histogram to CV2 Histogram
-
+        
 def np_hist_to_cv(np_histogram_output):
     counts, bin_edges = np_histogram_output
     return counts.ravel().astype('float32')
+
+### Plotting Functions ###
 
 # Function to display DataFrame in new browser tab.
 
@@ -145,163 +156,225 @@ def df_window(df):
     with NamedTemporaryFile(delete=False, suffix='.html') as f:
         df.to_html(f)
     webbrowser.open(f.name)
+    
+def plot_snow(names, data):
+    
+    fig, axes = plt.subplots( nrows = 4, ncols = 4 )
+    fig.suptitle('Fidelity Tests of Snow Patterns [m]', color = 'white')
+    for p, dat, ax in zip( names, data, axes.flat ):
+        # The vmin and vmax arguments specify the color limits
+        im = ax.imshow(dat, cmap = 'viridis', interpolation = 'nearest', vmin = 0, vmax = 2)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(p,fontsize = 8, color = 'white')
+    
+    # if # subplots is prime
+    
+    fig.delaxes(axes[-1,-1])
+    fig.delaxes(axes[-1,-2])
+    fig.delaxes(axes[-1,-3])
+
+    
+    # Make an axis for the colorbar on the bottom
+    
+    cax = fig.add_axes( [0.05, 0.2, 0.04, 0.6] )
+    fig.colorbar( im, cax=cax, ticks = ( [0,1,2] ) )
+    cax.tick_params(labelsize = 8, colors = 'white')
+    
+    
+def plot_tests(names, test_vals, test_name, data, rows, cols, cmin, cmax):
+    
+    fig, axes = plt.subplots( nrows = 4, ncols = 4 )
+    fig.suptitle( test_name + 'Fidelity Test of Snow Patterns' )
+    
+    for p, v, dat, ax in zip( names, test_vals, data, axes.flat ):
+        # The vmin and vmax arguments specify the color limits
+        im = ax.imshow(dat, cmap = 'viridis', interpolation = 'nearest', vmin = cmin, vmax = cmax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(p + " " + test_name + str(v), fontsize = 6, color = 'white' )
+    
+    # if # subplots is strange
+    if len(names) != rows*cols:
+        diff = -1*( rows*cols - len(names))
+        i = -1
+        while i >= diff:
+            fig.delaxes(axes[-1,i])
+            i = i-1
+    
+    # Make an axis for the colorbar on the bottom
+    
+    cax = fig.add_axes( [0.05, 0.2, 0.04, 0.6] )
+    fig.colorbar( im, cax=cax, ticks = ( [cmin, cmax] ) )
+    cax.tick_params(labelsize = 6, colors = 'white')
+    
+def render_mpl_table(data, col_width=3.0, row_height=0.625, font_size=14,
+                     header_color='#236192', row_colors=['#C7C9C7', 'w'], edge_color='w',
+                     bbox=[0, 0, 1, 1], header_columns=0,
+                     ax=None, **kwargs):
+    if ax is None:
+        size = (np.array(data.shape[::-1]) + np.array([0, 1])) * np.array([col_width, row_height])
+        fig, ax = plt.subplots(figsize=size)
+        ax.axis('off')
+
+    mpl_table = ax.table(cellText = data.values, bbox=bbox, colLabels=data.columns, **kwargs)
+
+    mpl_table.auto_set_font_size(False)
+    mpl_table.set_fontsize(font_size)
+    
+    for k, cell in six.iteritems(mpl_table._cells):
+        cell.set_edgecolor(edge_color)
+        
+        if k[0] == 0 or k[1] < header_columns:
+            cell.set_text_props(weight='bold', color='#FFCD00')
+            cell.set_facecolor(header_color)
+        else:
+            cell.set_facecolor(row_colors[k[0]%len(row_colors) ])
+    return ax
 
 
 # In[3]:
 
-# Reference Pattern of Horizontal Stripes alternating 4 white (1) and 4 black (0)
-stripes = np.zeros(( 32, 32 ))
-j = 0
-k = 4
+#Snow
 
-while k < 33:
-    stripes[j:k] = 1
-    j = j + 8
-    k = j + 4
-    
-# Gaussian Noise
-mu = 0.5
-sigma = 0.15
-gauss = np.random.normal( mu, sigma, ( 32,32 ))
+src1 = rasterio.open( '/home/cparr/Snow_Patterns/snow_data/happy_valley/raster/snow_on/hv_snow_watertrack_square2012.tif' )
+snow_test = src1.read(1)
+snow_test = snow_test.astype('float64')
 
 
 # In[4]:
 
 '''
-Warping a reference pattern of binary data.
+Snow Data Test
 '''
-binwarp_data = []
+
+snow_data = []
 
 # Initialize lists for metrics.
+
 mse_vals = []
 ssim_vals = []
+disp_vals = []
+
 top_lefts = []
 top_rights = []
 low_lefts = []
 low_rights = []
+
 imse_vals = []
 imse_maps = []
+
 mse_maps = []
 ssim_maps = []
 mse_maps = []
+
 cw_ssim_vals = []
 cw_ssim_maps = []
 
-def warp_binary(pattern):
-    
-    binwarp_data.append(pattern)
-    
-    rows, cols = pattern.shape
-    
-    # half phase shift for stripes
-    half_phase = np.zeros((32, 32))
 
-    j = 2
-    k = 6
-
-    while k < 33:
-        half_phase[j:k] = 1
-        j = j + 8
-        k = j + 4
-
-    binwarp_data.append(half_phase)
+# Create the test snows.
+def warp_snow(snow):
     
+    snow_data.append(snow)
+    
+    rows, cols = snow.shape
+    mu = snow.mean()
+    sigma = snow.std()
+
     # 90 degree rotation
-    rotate90 = np.rot90(pattern)
-    binwarp_data.append(rotate90)
+    rotate90 = np.rot90(snow)
+    snow_data.append(rotate90)
     
     #45 degree rotation
-    oblique = rotate(pattern, 45)
-    binwarp_data.append(oblique)
+    oblique = rotate(snow, 45)
+    b = oblique == 0
+    oblique[b] = np.random.normal(mu, sigma, size=b.sum())
+    snow_data.append(oblique)
     
     # morphological dilation and erosion
-    morph_dilation = dilation(pattern)
-    morph_erosion = erosion(pattern)
-    binwarp_data.append(morph_dilation)
-    binwarp_data.append(morph_erosion)
+
+    selem = square(7)
+    morph_dilation = dilation(snow, selem)
+    morph_erosion = erosion(snow, selem)
+    snow_data.append(morph_dilation)
+    snow_data.append(morph_erosion)
     
-    # flip up and down, basically a full phase shift or reflection
-    inverse = np.flipud(pattern)
-    binwarp_data.append(inverse)
+    # flip up and down, basically a phase shift
+    inverse = np.flipud(snow)
+    snow_data.append(inverse)
     
     # a shift or translation
     shift_M = np.float32([[1,0,1],[0,1,0]])
-    shifted = cv2.warpAffine(pattern,shift_M,(cols,rows))
-    binwarp_data.append(shifted)
+    shifted = cv2.warpAffine(snow,shift_M,(cols,rows))
+    snow_data.append(shifted)
     
     # randomly shuffle rows of array, create a random frequency
-    permutation = np.random.permutation(pattern)
-    binwarp_data.append(permutation)
+    permutation = np.random.permutation(snow)
+    snow_data.append(permutation)
     
+    # Random between bounds
+    random_abs1 = np.random.uniform(snow.min(), snow.max(), [rows, cols])
+    snow_data.append(random_abs1)
+    
+    # Gaussian noise
+    mu = snow.mean()
+    sigma = snow.std()
+    gauss_abs1 = np.random.normal(mu, sigma, (rows, cols))
+    snow_data.append(gauss_abs1)
     
     # Random Affine Transformation
-    c = np.random.random_sample(( 6, ))
+    
+    c = np.round(np.random.rand( 3,2 ), 2)
     m = np.append( c, ( 0,0,1 ) )
     m = m.reshape( 3,3 )
     aff_t = AffineTransform( matrix = m )
-    random_aff_warp = warp( pattern, aff_t )
-    binwarp_data.append( random_aff_warp )
+    random_aff_warp = warp( snow, aff_t )
+    b = random_aff_warp == 0
+    random_aff_warp[b] = np.random.normal(mu, sigma, size=b.sum())
+    snow_data.append(random_aff_warp)
     
-    # gauss
-    binwarp_data.append(gauss)
+    # Additive Gaussian Noise
+    noise = random_noise( snow, mode = 'gaussian' )
+    snow_data.append( noise )
     
-    # random binary
-    random_bin = np.random.randint(2, size=1024)
-    random_bin = random_bin.reshape(32,32)
-    random_bin = random_bin.astype('float64')
-    binwarp_data.append(random_bin)
+    # More Additive Gaussian Noise
+    more_noise = random_noise(random_noise(random_noise(random_noise( noise, mode = 'gaussian' ))))
+    snow_data.append( more_noise )
     
-    # Finger edges
-    edge = np.zeros(( 32, 32 ))
-    j = 0
-    k = 4
-
-    while k < 33:
-        edge[j:k] = 1
-        j = j + 8
-        k = j + 4
-    
-    edge[3][1::2] = 0
-    edge[7][1::2] = 1
-    edge[11][1::2] = 0
-    edge[15][1::2] = 1
-    edge[19][1::2] = 0
-    edge[23][1::2] = 1
-    edge[27][1::2] = 0
-    edge[31][1::2] = 1
-    binwarp_data.append(edge)
-
-# Subplot Titles and Dictionary Keys
-binwarp_names = ['Original', 'Half Phase Shift', 'Rotate 90','Rotate 45',
-                 'Dilation', 'Erosion','Y - Reflection', 'X Shift',
-                 'Row Shuffle', 'Random Affine', 'Gauss', 'Random','Edges']
+# Plot Titles and dictionary keys
+snow_names = ['Reference', 'Rotate 90', 'Rotate 45', 'Dilation',
+                 'Erosion', 'Y - Reflection', 'X Shift', 'Row Shuffle', 'Random', 'Gauss',
+                 'Random Affine', 'Add Gaussian Noise','More Noise']
 
 # Call It.
-warp_binary(stripes)
+warp_snow( snow_test )
 
-# Call Metrics on list of test patterns
+# Call Metrics on list of test snows
 
-structural_sim( binwarp_data )
-reg_mse( binwarp_data )
-make_quadrants( binwarp_data )
-imse(binwarp_data)
-cw_ssim_value(binwarp_data, 30)
+structural_sim( snow_data )
+reg_mse( snow_data )
+procrustes_analysis( snow_data )
+make_quadrants( snow_data )
 
+imse(snow_data)
 
-# Match names and arrays
-binary_zip = zip(binwarp_names,binwarp_data, mse_vals, ssim_vals, top_lefts, top_rights, low_lefts, low_rights, 
+cw_ssim_value(snow_data, 30)
+
+# Zip names, data, metrics, quadrants into a mega list!
+# Generally this is indavisable because it relies on indexing...in the next cell we will make a dictionary.
+snow_zip = zip(snow_names,snow_data, mse_vals, ssim_vals, disp_vals, top_lefts, top_rights, low_lefts, low_rights, 
                imse_vals, imse_maps, mse_maps, ssim_maps, cw_ssim_vals, cw_ssim_maps)
 
 
 # In[5]:
 
-binary_dict = defaultdict(dict)
+snow_dict = defaultdict(dict)
 
+'''
 # Making a look up dictionary from all the patterns and their comparison scores.
 # zipped list [i][0] is namne, 1 is full array, 2 is mse val, 3 is SSIM, 4 is PD,
-# 5 through 8 are quadrants
-# 9 is IMSE, 10 is IMSE Map
-
+# 5 through 8 are quadrants, 9 is IMSE, 10 is IMSE Map, 11 is MSE Map, 12 SSIM Map, 13 CWSSIM, 14 CWSSIM Map
+'''
 
 def to_dict_w_hists( data_dict, keys, data_zip ):
 
@@ -319,33 +392,34 @@ def to_dict_w_hists( data_dict, keys, data_zip ):
         
         data_dict[keys[i]]['MSE'] = round(data_zip[i][2], 2)
         data_dict[keys[i]]['SSIM'] = round(data_zip[i][3], 2)
+        data_dict[keys[i]]['Procrustres Disparity'] = round(data_zip[i][4], 2)
 
         data_dict[keys[i]]['arrays']['top left'] = {}
-        data_dict[keys[i]]['arrays']['top left']['array'] = data_zip[i][4]
-        data_dict[keys[i]]['arrays']['top left']['numpy hist'] = np.histogram( data_zip[i][4] )
-        data_dict[keys[i]]['arrays']['top left']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][4] ) )
+        data_dict[keys[i]]['arrays']['top left']['array'] = data_zip[i][5]
+        data_dict[keys[i]]['arrays']['top left']['numpy hist'] = np.histogram( data_zip[i][5] )
+        data_dict[keys[i]]['arrays']['top left']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][5] ) )
 
         data_dict[keys[i]]['arrays']['top right'] = {}
-        data_dict[keys[i]]['arrays']['top right']['array'] = data_zip[i][5]
-        data_dict[keys[i]]['arrays']['top right']['numpy hist'] = np.histogram( data_zip[i][5] )
-        data_dict[keys[i]]['arrays']['top right']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][5] ) )
+        data_dict[keys[i]]['arrays']['top right']['array'] = data_zip[i][6]
+        data_dict[keys[i]]['arrays']['top right']['numpy hist'] = np.histogram( data_zip[i][6] )
+        data_dict[keys[i]]['arrays']['top right']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][6] ) )
 
         data_dict[keys[i]]['arrays']['low left'] = {}
-        data_dict[keys[i]]['arrays']['low left']['array'] = data_zip[i][6]
-        data_dict[keys[i]]['arrays']['low left']['numpy hist'] = np.histogram( data_zip[i][6] )
-        data_dict[keys[i]]['arrays']['low left']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][6] ) )
+        data_dict[keys[i]]['arrays']['low left']['array'] = data_zip[i][7]
+        data_dict[keys[i]]['arrays']['low left']['numpy hist'] = np.histogram( data_zip[i][7] )
+        data_dict[keys[i]]['arrays']['low left']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][7] ) )
 
         data_dict[keys[i]]['arrays']['low right'] = {}
-        data_dict[keys[i]]['arrays']['low right']['array'] = data_zip[i][7]
-        data_dict[keys[i]]['arrays']['low right']['numpy hist'] = np.histogram( data_zip[i][7] )
-        data_dict[keys[i]]['arrays']['low right']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][7] ) )    
+        data_dict[keys[i]]['arrays']['low right']['array'] = data_zip[i][8]
+        data_dict[keys[i]]['arrays']['low right']['numpy hist'] = np.histogram( data_zip[i][8] )
+        data_dict[keys[i]]['arrays']['low right']['cv2 hist'] = np_hist_to_cv( np.histogram( data_zip[i][8] ) )    
 
-        data_dict[keys[i]]['IMSE'] = round(data_zip[i][8], 2)
-        data_dict[keys[i]]['IMSE Map'] = data_zip[i][9]
-        data_dict[keys[i]]['MSE Map'] = data_zip[i][10]
-        data_dict[keys[i]]['SSIM Map'] = data_zip[i][11]
-        data_dict[keys[i]]['CW SSIM'] = data_zip[i][12]
-        data_dict[keys[i]]['CW SSIM Map'] = data_zip[i][13]
+        data_dict[keys[i]]['IMSE'] = round(data_zip[i][9], 2)
+        data_dict[keys[i]]['IMSE Map'] = data_zip[i][10]
+        data_dict[keys[i]]['MSE Map'] = data_zip[i][11]
+        data_dict[keys[i]]['SSIM Map'] = data_zip[i][12]
+        data_dict[keys[i]]['CW SSIM'] = data_zip[i][13]
+        data_dict[keys[i]]['CW SSIM Map'] = data_zip[i][14]
 
         # Histogram Comparisons
 
@@ -429,17 +503,19 @@ def to_dict_w_hists( data_dict, keys, data_zip ):
 
         i = i + 1
 
-to_dict_w_hists( binary_dict, binwarp_names, binary_zip )
 
-bin_df = pd.DataFrame.from_dict( binary_dict )
-bin_df = bin_df.transpose()
+# In[6]:
+
+to_dict_w_hists( snow_dict, snow_names, snow_zip )
+snow_df = pd.DataFrame.from_dict(snow_dict)
+snow_df = snow_df.transpose()
 
 
 # In[7]:
 
 # Histogram Scores
 
-hist_scores = bin_df.loc[:,['name', 'Bhattacharyya UL','Bhattacharyya UR','Bhattacharyya LL',
+hist_scores = snow_df.loc[:,['name', 'Bhattacharyya UL','Bhattacharyya UR','Bhattacharyya LL',
 'Bhattacharyya LR', 'Bhattacharyya Full','Correlation UL','Correlation UR','Correlation LL',
 'Correlation LR', 'Correlation Full','Chi Square UL','Chi Square UR','Chi Square LL',
 'Chi Square LR', 'Chi Square Full']]
@@ -458,24 +534,25 @@ hist_scores = hist_scores[['Mean Bhattacharyya', 'Mean Chi Square','Mean Correla
 
 hist_scores = hist_scores.sort_values('Mean Bhattacharyya')
 
-df_window(hist_scores)
+#df_window(hist_scores)
 
 
 # In[8]:
 
-# Binary Scores DataFrame
+# Snow Scores and Ranks
 
-binary_scores = bin_df.copy()
-binary_scores['Pattern'] = bin_df['name']
-binary_scores = binary_scores[['Pattern', 'MSE', 'SSIM', 'IMSE', 'CW SSIM']]
-binary_scores = binary_scores.sort_values( 'CW SSIM', ascending = False )
+snow_scores = snow_df.copy()
+snow_scores['Pattern'] = snow_df['name']
+snow_scores = snow_scores[['Pattern', 'MSE', 'SSIM', 'IMSE', 'Procrustres Disparity', 'CW SSIM']]
+snow_scores = snow_scores.sort_values( 'CW SSIM', ascending = False )
 
-ranks = binary_scores.copy()
-ranks['Pattern'] = bin_df['name']
-ranks['MSE Rank'] = np.round(binary_scores['MSE'].rank(ascending=True))
-ranks['SSIM Rank'] = binary_scores['SSIM'].rank(ascending=False)
-ranks['IMSE Rank'] = np.round(binary_scores['IMSE'].rank(ascending=True))
-ranks['CW-SSIM Rank'] = binary_scores['CW SSIM'].rank(ascending=False)
+ranks = snow_scores.copy()
+ranks['Pattern'] = snow_df['name']
+ranks['MSE Rank'] = np.round(snow_scores['MSE'].rank(ascending=True))
+ranks['SSIM Rank'] = snow_scores['SSIM'].rank(ascending=False)
+ranks['IMSE Rank'] = np.round(snow_scores['IMSE'].rank(ascending=True))
+ranks['CW-SSIM Rank'] = snow_scores['CW SSIM'].rank(ascending=False)
+ranks['Disparity Rank'] = snow_scores['Procrustres Disparity'].rank()
 ranks['Bhattacharyya Rank'] = hist_scores['Mean Bhattacharyya'].rank(ascending=True)
 ranks['Chi Square Rank'] = hist_scores['Mean Chi Square'].rank(ascending=True)
 ranks['Correlation Rank'] = hist_scores['Mean Correlation'].rank(ascending=False)
@@ -483,125 +560,83 @@ del ranks['MSE']
 del ranks['IMSE']
 del ranks['SSIM']
 del ranks['CW SSIM']
+del ranks ['Procrustres Disparity']
 ranks = ranks.sort_values('CW-SSIM Rank')
 
-df_window(ranks)
+#df_window(snow_scores)
 
 
-# In[9]:
+# In[14]:
 
-from matplotlib import six
+render_mpl_table(ranks)
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/snow_test_ranks.png', bbox_inches = 'tight', dpi = 300)
+plt.close()
 
-def render_mpl_table(data, col_width=3.0, row_height=0.625, font_size=14,
-                     header_color='#236192', row_colors=['#C7C9C7', 'w'], edge_color='w',
-                     bbox=[0, 0, 1, 1], header_columns=0,
-                     ax=None, **kwargs):
-    if ax is None:
-        size = (np.array(data.shape[::-1]) + np.array([0, 1])) * np.array([col_width, row_height])
-        fig, ax = plt.subplots(figsize=size)
-        ax.axis('off')
+render_mpl_table(snow_scores)
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/snow_test_scores.png', bbox_inches = 'tight', dpi = 300)
+plt.close()
 
-    mpl_table = ax.table(cellText = data.values, bbox=bbox, colLabels=data.columns, **kwargs)
+plot_snow( snow_names, snow_data )
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/hv_snow_warps.png', bbox_inches = 'tight', dpi = 300, facecolor = 'black')
+plt.close()
+# names, test_vals, test_name, data, rows, cols, cmin, cmax
 
-    mpl_table.auto_set_font_size(False)
-    mpl_table.set_fontsize(font_size)
-    
-    for k, cell in six.iteritems(mpl_table._cells):
-        cell.set_edgecolor(edge_color)
-        
-        if k[0] == 0 or k[1] < header_columns:
-            cell.set_text_props(weight='bold', color='#FFCD00')
-            cell.set_facecolor(header_color)
-        else:
-            cell.set_facecolor(row_colors[k[0]%len(row_colors) ])
-    return ax
+plot_tests( snow_names, imse_vals, " IMSE: ", imse_maps, 4, 4, 0, 1 )
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/hv_imse_map.png', bbox_inches = 'tight', dpi = 300, facecolor = 'black')
+plt.close()
+
+plot_tests( snow_names, mse_vals, " MSE: ", mse_maps, 4, 4, 0, 1 )
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/hv_mse_map.png', bbox_inches = 'tight', dpi = 300, facecolor = 'black')
+plt.close()
+
+plot_tests( snow_names, ssim_vals, " SSIM: ", ssim_maps, 4, 4, -1, 1 )
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/hv_ssim_map.png', bbox_inches = 'tight', dpi = 300, facecolor = 'black')
+plt.close()
+
+plot_tests( snow_names, cw_ssim_vals, " CW SSIM: ", cw_ssim_maps, 4, 4, -1, 1 )
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/hv_cw_ssim_map.png', bbox_inches = 'tight', dpi = 300, facecolor = 'black')
+plt.close()
 
 
 # In[10]:
 
-render_mpl_table(ranks)
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_ranks.png', bbox_inches = 'tight', dpi = 300)
-plt.close()
-render_mpl_table(binary_scores)
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_scores.png', bbox_inches = 'tight', dpi = 300)
+from skimage import measure
 
 
-# In[11]:
-
-# Plot binary patterns and distortions
-
-def plot_binary(names, data):
-
-    fig, axes = plt.subplots( nrows = 4, ncols = 4 )
-    fig.suptitle( 'Fidelity Tests of Binary Depth Patterns' )
+fig, axes = plt.subplots( nrows = 4, ncols = 4 )
+fig.suptitle('Fidelity Tests of Snow Depth Patterns [m]', color = 'white')
+for p, dat, ax in zip( snow_names, snow_data, axes.flat ):
     
-    for p, dat, ax in zip( names, data, axes.flat ):
-        im = ax.imshow(dat, cmap = 'gray', interpolation = 'nearest')
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title(p,fontsize = 10)
-    
-    # if # subplots is prime delete some axes
-    fig.delaxes(axes[-1,-1])
-    fig.delaxes(axes[-1,-2])
-    fig.delaxes(axes[-1,-3])
-    
-    # Make an axis for the colorbar on the bottom
-    
-    cax = fig.add_axes( [0.05, 0.2, 0.04, 0.6] )
-    fig.colorbar( im, cax=cax, ticks = ([0,1]) )
-    cax.tick_params(labelsize = 10)
+    contours = measure.find_contours(dat, 0.8)
 
-def plot_tests(names, test_vals, test_name, data, rows, cols, cmin, cmax):
+    # The vmin and vmax arguments specify the color limits
+    im = ax.imshow(dat, cmap = 'gray', interpolation = 'nearest', vmin = 0, vmax = 2)
     
-    fig, axes = plt.subplots( nrows = 4, ncols = 4 )
-    fig.suptitle( test_name + 'Fidelity Tests of Binary Depth Patterns' )
+    for n, contour in enumerate(contours):
+        if contour.size >= 150:
+            ax.plot(contour[:, 1], contour[:, 0], linewidth=0.5)
 
     
-    for p, v, dat, ax in zip( names, test_vals, data, axes.flat ):
-        # The vmin and vmax arguments specify the color limits
-        im = ax.imshow(dat, cmap = 'gray', interpolation = 'nearest', vmin = cmin, vmax = cmax)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title( p + " " + test_name + str(v), fontsize = 8 )
-    
-    # if # subplots is strange
-    if len(names) != rows*cols:
-        diff = -1*( rows*cols - len(names))
-        i = -1
-        while i >= diff:
-            fig.delaxes(axes[-1,i])
-            i = i-1
-    
-    # Make an axis for the colorbar on the bottom
-    
-    cax = fig.add_axes( [0.05, 0.2, 0.04, 0.6] )
-    fig.colorbar( im, cax=cax, ticks = ( [cmin, cmax] ) )
-    cax.tick_params(labelsize = 8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(p,fontsize = 8, color = 'white')
+    ax.axis('image')
 
 
-# In[12]:
+# if # subplots is prime
 
-plot_binary( binwarp_names, binwarp_data )
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_test_patterns.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
-plt.close()
+fig.delaxes(axes[-1,-1])
+fig.delaxes(axes[-1,-2])
+fig.delaxes(axes[-1,-3])
 
-# names, test_vals, test_name, data, rows, cols, cmin, cmax
 
-plot_tests( binwarp_names, imse_vals, " IMSE: ", imse_maps, 4, 4, 0, 1 )
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_imse_map.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
-plt.close()
+# Make an axis for the colorbar on the bottom
 
-plot_tests( binwarp_names, mse_vals, " MSE: ", mse_maps, 4, 4, 0, 1 )
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_mse_map.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
-plt.close()
+cax = fig.add_axes( [0.05, 0.2, 0.04, 0.6] )
+fig.colorbar( im, cax=cax, ticks = ( [0,1,2] ) )
+cax.tick_params(labelsize = 8, colors = 'white')
 
-plot_tests( binwarp_names, ssim_vals, " SSIM: ", ssim_maps, 4, 4, -1, 1 )
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_ssim_map.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
-plt.close()
-
-plot_tests( binwarp_names, cw_ssim_vals, " CW SSIM: ", cw_ssim_maps, 4, 4, -1, 1 )
-plt.savefig('/home/cparr/Snow_Patterns/figures/binary_test/binary_cw_ssim_map.png', bbox_inches = 'tight', dpi = 300, facecolor = '#EFDBB2')
+plt.savefig('/home/cparr/Snow_Patterns/figures/hv_snow_test/hv_contour_map.png', bbox_inches = 'tight', dpi = 300, facecolor = 'black')
 
 
 # In[ ]:
