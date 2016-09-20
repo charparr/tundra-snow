@@ -76,6 +76,40 @@ print 'FSIM: ' + str(fsim)
 print 'FSIMC: ' + str(fsimc)
 
 
+fig, axes = plt.subplots( nrows = 2, ncols = 3 )
+    
+plt.subplot(231)
+plt.imshow(img)
+plt.title('Reference')
+plt.xticks([])
+plt.yticks([])
 
+plt.subplot(232)
+plt.imshow(dst, cmap = 'gray')
+plt.title('Distorted')
+plt.xticks([])
+plt.yticks([])
 
+plt.subplot(233)
+plt.imshow(pc1, cmap = 'gray')
+plt.title('Ref. PC', size = 8)
+plt.xticks([])
+plt.yticks([])
+
+plt.subplot(234)
+plt.imshow(pc2, cmap = 'gray')
+plt.title('Dist. PC', size = 8)
+plt.xticks([])
+plt.yticks([])
+
+plt.subplot(235)
+plt.imshow(s_L, cmap = 'gray')
+plt.xticks([])
+plt.yticks([])
+plt.title('FSIM: '+ str(fsim))
+
+fig.delaxes(axes[-1,-1]) 
+
+plt.savefig('/home/cparr/Snow_Patterns/figures/gsmd/fsim_rapids.png',
+            bbox_inches = 'tight', dpi = 300, facecolor = 'skyblue')
 
