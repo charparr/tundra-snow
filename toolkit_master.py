@@ -11,24 +11,18 @@ determine the similiarity or lack thereof between two images.
 
 import glob
 import re
-from collections import defaultdict
-import numpy as np
-from itertools import combinations
-#from scipy import ndimage
-#import matplotlib.pyplot as plt
-import cv2
-from skimage.measure import compare_ssim as ssim
-from skimage.measure import compare_mse as mse
-from skimage.filters import scharr
 import phasepack
 import rasterio
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+from collections import defaultdict
+from itertools import combinations
+from skimage.measure import compare_ssim as ssim
+from skimage.measure import compare_mse as mse
 from scipy import signal
 from scipy import fftpack
-#from scipy.spatial import *
-#from scipy.ndimage import *
-#from skimage.transform import *
-#from skimage.morphology import *
-#from skimage.util import *
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 def input_data(path_to_snow_data):
     
@@ -46,6 +40,7 @@ def input_data(path_to_snow_data):
         subset_256_avgfltr_2x2 = cv2.blur( snow_image[3200:3456,310:566],(2,2))
     
         name = f.split('/')[-1].rstrip('_snow_full.tif')
+        name = name.strip('hv_')
         
         snow_dict[name] = subset_256_avgfltr_2x2
 
@@ -134,7 +129,7 @@ def gmsd(reference, target):
     return gms_index, gms_map
 
 
-def feature_sim(reference_img, dist_img):
+def feature_sim(reference, target):
     
     """
     Return the Feature Similarity Index (FSIM).
@@ -148,57 +143,54 @@ def feature_sim(reference_img, dist_img):
     
     # Convert the input images to YIQ color space
     # Y is the luma compenent, i.e. B & W
-    r, g, b = reference_img[:,:,0], reference_img[:,:,1], reference_img[:,:,2]
-    imgY = 0.299 * r + 0.587 * g + 0.114 * b
-    imgI = 0.596 * r - 0.275 * g - 0.321 * b
-    imgQ = 0.212 * r - 0.523 * g + 0.311 * b
-    
-    r_d, g_d, b_d = dist_img[:,:,0], dist_img[:,:,1], dist_img[:,:,2]
-    dstY = 0.299 * r_d + 0.587 * g_d + 0.114 * b_d
-    dstI = 0.596 * r_d - 0.275 * g_d - 0.321 * b_d
-    dstQ = 0.212 * r_d - 0.523 * g_d + 0.311 * b_d
-    
+    # imgY = 0.299 * r + 0.587 * g + 0.114 * b
+
     # Constants provided by the authors
     t1 = 0.85
     t2 = 160
-    t3 = 200
-    t4 = 200
-    
-    # Similarity of the chromatic features (I and Q channels)
-    s_Q = ( 2*imgQ + dstQ + t4 )  / ( imgQ**2 + dstQ**2 + t4 )
-    s_I = ( 2*imgI + dstI + t3 )  / ( imgI**2 + dstI**2 + t3 )
     
     # Phase congruency (PC) images. "PC...a dimensionless measure for the
     # significance of local structure.
     
-    pc1 = phasepack.phasecong(imgY, nscale = 4, norient = 4, minWaveLength = 6,
-                              mult = 2, sigmaOnf=0.55)
-    pc2 = phasepack.phasecong(dstY, nscale = 4, norient = 4, minWaveLength = 6,
-                              mult = 2, sigmaOnf=0.55)
+    pc1 = phasepack.phasecong(reference, nscale = 4, norient = 4, 
+                              minWaveLength = 6, mult = 2, sigmaOnf=0.55)
+                              
+    pc2 = phasepack.phasecong(target, nscale = 4, norient = 4,
+                              minWaveLength = 6, mult = 2, sigmaOnf=0.55)
+                              
     pc1 = pc1[0]  # Reference PC map
     pc2 = pc2[0]  # Distorted PC map
     
     # Similarity of PC components
     s_PC = ( 2*pc1 + pc2 + t1 )  / ( pc1**2 + pc2**2 + t1 )
     
-    # Compute gradient magnitude maps using the Scharr operator
-    g1 = scharr( imgY )
-    g2 = scharr( dstY )
+    # compute the Scharr gradient magnitude representation of the images
+    # in both the x and y direction
+    refgradX = cv2.Sobel(reference, cv2.CV_64F, dx = 1, dy = 0, ksize = -1)
+    refgradY = cv2.Sobel(reference, cv2.CV_64F, dx = 0, dy = 1, ksize = -1)
     
-    # The gradient magnitude similarity
-    s_G = ( 2*g1 + g2 + t2 )  / ( g1**2 + g2**2 + t2 )
+    targradX = cv2.Sobel(target, cv2.CV_64F, dx = 1, dy = 0, ksize = -1)
+    targradY = cv2.Sobel(target, cv2.CV_64F, dx = 0, dy = 1, ksize = -1)
     
-    s_L = s_PC * s_G  # Luminance similarity
+    refgradient = np.maximum(refgradX, refgradY)    
+    targradient = np.maximum(targradX, targradY)   
+    
+    #refgradient = np.sqrt(( refgradX**2 ) + ( refgradY**2 ))
+    
+    #targradient = np.sqrt(( targradX**2 ) + ( targradY**2 ))
 
-    s_C = s_I * s_Q  # Chromatic simlarity
+    # The gradient magnitude similarity
+
+    s_G = (2*refgradient + targradient + t2) / (refgradient**2 + targradient**2 + t2)
     
-    pcM = np.maximum(pc1,pc2)  # Maximum PC is used to weight s_L...basically
-    #  PC structures are significant
+    s_L = s_PC * s_G  # luma similarity
+    
+    pcM = np.maximum(pc1,pc2)
         
     fsim = round( np.nansum( s_L * pcM) / np.nansum(pcM), 3)
     
-    fsimc = round( np.nansum( s_L * s_C**0.3 * pcM) / np.nansum(pcM), 3)
-#  
+    return fsim
+
 
 def cw_ssim(reference, target, width):
     
@@ -243,13 +235,16 @@ def cw_ssim(reference, target, width):
         
         return cw_ssim_index, cw_ssim_map
 
-def mse_and_ssim():
+ 
+def do_all_metrics():
     
     pairs_lvl0 = [k for k in comparison_dict.iterkeys()]
     
     for p in pairs_lvl0:
         
         data_keys = [j for j in comparison_dict[p].iterkeys()]
+        regex = re.compile('2')
+        snow = [string for string in data_keys if re.match(regex, string)]
         
         comparison_dict[p]['MSE'] = round(mse(comparison_dict[p][data_keys[0]],
                                         comparison_dict[p][data_keys[1]]),3)
@@ -263,47 +258,20 @@ def mse_and_ssim():
         comparison_dict[p]['SSIM Map'] = ssim(comparison_dict[p][data_keys[0]], 
                                           comparison_dict[p][data_keys[1]],
                                             full = True)[1]
-                                            
-def do_cw_ssim():
     
-    pairs_lvl0 = [k for k in comparison_dict.iterkeys()]
-    
-    for p in pairs_lvl0:
-        
-        data_keys = [j for j in comparison_dict[p].iterkeys()]
-        
         comparison_dict[p]['CW-SSIM'] = cw_ssim(comparison_dict[p][data_keys[0]],
                                         comparison_dict[p][data_keys[1]], 20)[0]
                                         
         comparison_dict[p]['CW-SSIM Map'] = cw_ssim(comparison_dict[p][data_keys[0]],
                                         comparison_dict[p][data_keys[1]], 20)[1]
                                         
-def do_gmsd():
-    
-    pairs_lvl0 = [k for k in comparison_dict.iterkeys()]
-    
-    for p in pairs_lvl0:
-        
-        data_keys = [j for j in comparison_dict[p].iterkeys()]
-        regex = re.compile('h')
-        snow = [string for string in data_keys if re.match(regex, string)]
-        
         comparison_dict[p]['GMS'] = gmsd(comparison_dict[p][snow[0]],
                                         comparison_dict[p][snow[1]])[0]
                                         
         comparison_dict[p]['GMS Map'] = gmsd(comparison_dict[p][snow[0]],
                                         comparison_dict[p][snow[1]])[1]
-                                        
-def do_dct():
+
     
-    pairs_lvl0 = [k for k in comparison_dict.iterkeys()]
-    
-    for p in pairs_lvl0:
-        
-        data_keys = [j for j in comparison_dict[p].iterkeys()]
-        regex = re.compile('h')
-        snow = [string for string in data_keys if re.match(regex, string)]
-        
         comparison_dict[p][snow[0]+' DCT Map'] = discrete_cosine(comparison_dict[p][snow[0]],
                                         comparison_dict[p][snow[1]])[0]
                                         
@@ -315,8 +283,15 @@ def do_dct():
                                         
         comparison_dict[p][snow[1]+' DCT Curve'] = discrete_cosine(comparison_dict[p][snow[0]],
                                         comparison_dict[p][snow[1]])[3]
-                                            
-    
+                                        
+                                        
+        comparison_dict[p]['FSIM'] = feature_sim(comparison_dict[p][snow[0]],
+                                        comparison_dict[p][snow[1]])
+                                        
+#        comparison_dict[p]['FSIM Map'] = gmsd(comparison_dict[p][snow[0]],
+#                                        comparison_dict[p][snow[1]])[1]                             
+                                        
+                                        
 snow_dict = defaultdict(dict)
 
 input_data('/home/cparr/Snow_Patterns/snow_data/happy_valley/raster/snow_on/full_extent/')
@@ -324,17 +299,56 @@ input_data('/home/cparr/Snow_Patterns/snow_data/happy_valley/raster/snow_on/full
 comparison_dict = defaultdict(dict)
 
 for pair in combinations(snow_dict.iteritems(), 2):
-    comparison_dict[pair[0][0] + "  vs.  " + pair[1][0]] = {}
-    comparison_dict[pair[0][0] + "  vs.  " + pair[1][0]][pair[0][0]] = pair[0][1]
-    comparison_dict[pair[0][0] + "  vs.  " + pair[1][0]][pair[1][0]] = pair[1][1]
+    comparison_dict[pair[0][0] + " vs. " + pair[1][0]] = {}
+    comparison_dict[pair[0][0] + " vs. " + pair[1][0]][pair[0][0]] = pair[0][1]
+    comparison_dict[pair[0][0] + " vs. " + pair[1][0]][pair[1][0]] = pair[1][1]
     del pair
 
-mse_and_ssim()
-do_cw_ssim()
-do_gmsd()
-do_dct()
+do_all_metrics()
 
+#==============================================================================
+# 
 
+for j in comparison_dict.keys():
 
-
-
+     titles = [x for x in comparison_dict[j] if
+      type(comparison_dict[j][x]) != float and
+      len(comparison_dict[j][x].shape) == 2]
+     titles = sorted(titles)
+     titles.insert(1, titles.pop(2))
+     
+     i=1
+     
+     fig, axes = plt.subplots(nrows = 2, ncols = 4)
+     
+     plt.suptitle(j + ' Snow Pattern Comparison')
+     
+     for name in titles:
+      
+         ax1 = plt.subplot(2,4,i)
+         ax1.xaxis.set_visible(False)
+         ax1.yaxis.set_visible(False)
+         ax1.set_title(name, fontsize = 9)
+         im1 = ax1.imshow(comparison_dict[j][name], cmap = 'viridis')
+         divider1 = make_axes_locatable(ax1)
+         cax1 = divider1.append_axes("bottom", size="7%", pad=0.05)
+         cax1.tick_params(labelsize = 5)
+         cbar1 = plt.colorbar(im1, cax=cax1, orientation = 'horizontal')
+         cbar1.set_ticks([round(comparison_dict[j][name].min(),2),round(comparison_dict[j][name].max(),2)])
+         
+         
+         
+         i+=1
+      
+     textstr = 'MSE = %s, SSIM = %s, CW-SSIM = %s, GMS = %s, FSIM = %s' % (
+      comparison_dict[j]['MSE'],comparison_dict[j]['SSIM'],
+      comparison_dict[j]['CW-SSIM'],comparison_dict[j]['GMS'],
+      comparison_dict[j]['FSIM'])
+      
+     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+     
+     fig.text(0.2, 0.52, textstr, fontsize=7,
+             verticalalignment='top', bbox=props)
+     
+     plt.savefig('/home/cparr/Snow_Patterns/figures/' + j + '.png', dpi = 300,
+                 bbox_inches = 'tight')
